@@ -7,28 +7,61 @@ describe("FlashloanArbitrage", function () {
   let addr1;
   let addr2;
 
-  // Mumbai testnet addresses
-  const AAVE_POOL = "0x1758D4e6f68166C4B2d9d0F86f7F7748b9A7F6D5";
-  const UNISWAP_ROUTER = "0x8954AfA98594b838bda56FE4C12a09D7739D179b";
-  const SUSHISWAP_ROUTER = "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506";
+  // Local test addresses (we'll deploy mock contracts)
+  let mockAavePool;
+  let mockUniswapRouter;
+  let mockSushiRouter;
 
-  // Test token addresses (Mumbai testnet)
-  const USDC = "0xe6b8a5CF854791412c1f6EFC7CAf629f5Df1c747";
-  const WETH = "0xA6FA4fB5f76172d178d61B04b0ecd319C5d1C0aa";
-  const USDT = "0x3813e82e6f7098b9583FC0F33a962D02018B6803";
+  // Test token addresses
+  let mockUSDC;
+  let mockWETH;
+  let mockUSDT;
 
   beforeEach(async function () {
     // Get signers
     [owner, addr1, addr2] = await ethers.getSigners();
 
-    // Deploy contract
+    // Deploy mock contracts
+    const MockToken = await ethers.getContractFactory("MockERC20");
+    mockUSDC = await MockToken.deploy("Mock USDC", "USDC");
+    mockWETH = await MockToken.deploy("Mock WETH", "WETH");
+    mockUSDT = await MockToken.deploy("Mock USDT", "USDT");
+
+    const MockPool = await ethers.getContractFactory("MockAavePool");
+    mockAavePool = await MockPool.deploy();
+
+    const MockRouter = await ethers.getContractFactory("MockRouter");
+    mockUniswapRouter = await MockRouter.deploy();
+    mockSushiRouter = await MockRouter.deploy();
+
+    // Deploy main contract
     const FlashloanArbitrage = await ethers.getContractFactory("FlashloanArbitrage");
     flashloanArbitrage = await FlashloanArbitrage.deploy(
-      AAVE_POOL,
-      UNISWAP_ROUTER,
-      SUSHISWAP_ROUTER
+      mockAavePool.address,
+      mockUniswapRouter.address,
+      mockSushiRouter.address
     );
     await flashloanArbitrage.deployed();
+
+    // Mint tokens to the mock routers and FlashloanArbitrage contract
+    const amount = ethers.utils.parseEther("1000000");
+    await mockUSDC.mint(mockUniswapRouter.address, amount);
+    await mockWETH.mint(mockUniswapRouter.address, amount);
+    await mockUSDT.mint(mockUniswapRouter.address, amount);
+    await mockUSDC.mint(mockSushiRouter.address, amount);
+    await mockWETH.mint(mockSushiRouter.address, amount);
+    await mockUSDT.mint(mockSushiRouter.address, amount);
+    await mockUSDC.mint(flashloanArbitrage.address, amount);
+    await mockWETH.mint(flashloanArbitrage.address, amount);
+    await mockUSDT.mint(flashloanArbitrage.address, amount);
+
+    // Approve tokens for the flash loan arbitrage contract
+    await mockUSDC.connect(owner).approve(flashloanArbitrage.address, ethers.constants.MaxUint256);
+    await mockWETH.connect(owner).approve(flashloanArbitrage.address, ethers.constants.MaxUint256);
+    await mockUSDT.connect(owner).approve(flashloanArbitrage.address, ethers.constants.MaxUint256);
+
+    // Approve tokens for routers in the FlashloanArbitrage contract
+    await flashloanArbitrage.approveTokens([mockUSDC.address, mockWETH.address, mockUSDT.address]);
   });
 
   describe("Deployment", function () {
@@ -36,28 +69,22 @@ describe("FlashloanArbitrage", function () {
       expect(await flashloanArbitrage.owner()).to.equal(owner.address);
     });
 
-    it("Should set the correct Aave Pool address", async function () {
-      expect(await flashloanArbitrage.aavePool()).to.equal(AAVE_POOL);
-    });
-
-    it("Should set the correct Uniswap Router address", async function () {
-      expect(await flashloanArbitrage.uniswapRouter()).to.equal(UNISWAP_ROUTER);
-    });
-
-    it("Should set the correct SushiSwap Router address", async function () {
-      expect(await flashloanArbitrage.sushiswapRouter()).to.equal(SUSHISWAP_ROUTER);
+    it("Should set the correct contract addresses", async function () {
+      expect(await flashloanArbitrage.aavePool()).to.equal(mockAavePool.address);
+      expect(await flashloanArbitrage.uniswapRouter()).to.equal(mockUniswapRouter.address);
+      expect(await flashloanArbitrage.sushiswapRouter()).to.equal(mockSushiRouter.address);
     });
   });
 
   describe("Arbitrage Execution", function () {
     it("Should only allow owner to execute arbitrage", async function () {
       const amount = ethers.utils.parseEther("1000");
-      const path1 = [USDC, WETH, USDT];
-      const path2 = [USDT, WETH, USDC];
+      const path1 = [mockUSDC.address, mockWETH.address, mockUSDT.address];
+      const path2 = [mockUSDT.address, mockWETH.address, mockUSDC.address];
 
       await expect(
         flashloanArbitrage.connect(addr1).executeArbitrage(
-          USDC,
+          mockUSDC.address,
           amount,
           path1,
           path2
@@ -67,18 +94,18 @@ describe("FlashloanArbitrage", function () {
 
     it("Should emit ArbitrageExecuted event", async function () {
       const amount = ethers.utils.parseEther("1000");
-      const path1 = [USDC, WETH, USDT];
-      const path2 = [USDT, WETH, USDC];
+      const path1 = [mockUSDC.address, mockWETH.address, mockUSDT.address];
+      const path2 = [mockUSDT.address, mockWETH.address, mockUSDC.address];
 
       await expect(
         flashloanArbitrage.executeArbitrage(
-          USDC,
+          mockUSDC.address,
           amount,
           path1,
           path2
         )
       ).to.emit(flashloanArbitrage, "ArbitrageExecuted")
-        .withArgs(USDC, amount, ethers.BigNumber.from(0)); // Initial profit will be 0
+        .withArgs(mockUSDC.address, amount, ethers.BigNumber.from(0));
     });
   });
 

@@ -2,7 +2,7 @@
 
 ## Day 1: Project Setup & Smart Contract Basics
 
-### 1.1: Project Setup
+### 1.1: Project Setup  - DONE
 **Tasks**:
 - Set up **Node.js**, **Python**, **Hardhat**, and **Truffle**.
 - Create the **project folder structure**.
@@ -13,13 +13,13 @@
 - Set up **Hardhat project**.
 - Install **Subgraph dependencies** and set up **The Graph**.
 
-### 1.2: Develop Flashloan Smart Contract
+### 1.2: Develop Flashloan Smart Contract - DONE
 **Tasks**:
 - Create a simple **Solidity contract** for flashloan borrowing.
 - Implement functionality to borrow from **Aave** and swap using **Uniswap/SushiSwap**.
 - Write the flashloan arbitrage contract: borrow funds, check for arbitrage, and execute the trade.
 
-### 1.3: Deploy Smart Contract on Test Network
+### 1.3: Deploy Smart Contract on Test Network  - NOW WE ARE WORKING ON TESTING IT 
 **Tasks**:
 - Deploy the **flashloan contract** on **Rinkeby** or **Polygon Mumbai**.
 - Verify the contract on the testnet with **MetaMask**.
@@ -121,3 +121,24 @@
 ---
 
 This condensed **5-day schedule** prioritizes the core aspects of your project while leaving room for testing, optimization, and deployment.
+
+
+
+Here are the results from your deployment:
+FlashloanArbitrage contract address:
+0x0165878A594ca255338adfa4d48449f69242Eb8F
+Contract name:
+FlashloanArbitrage
+ABI location:
+artifacts/contracts/FlashloanArbitrage.sol/FlashloanArbitrage.json
+Network:
+localhost
+
+
+
+
+## STEPS
+Network: localhost
+Contract address: 0x0165878A594ca255338adfa4d48449f69242Eb8F
+ABI: artifacts/contracts/FlashloanArbitrage.sol/FlashloanArbitrage.json
+Subgraph slug: (e.g., flashloan-arbitrage)

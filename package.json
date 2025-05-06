@@ -23,12 +23,12 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@graphprotocol/graph-cli": "^0.60.0",
+    "@graphprotocol/graph-ts": "^0.31.0",
     "@nomicfoundation/hardhat-toolbox": "^2.0.2",
     "@nomiclabs/hardhat-ethers": "^2.2.3",
     "@nomiclabs/hardhat-waffle": "^2.0.6",
-    "@openzeppelin/contracts": "^4.9.3",
-    "@graphprotocol/graph-cli": "^0.60.0",
-    "@graphprotocol/graph-ts": "^0.31.0",
+    "@openzeppelin/contracts": "^4.9.6",
     "chai": "^4.3.7",
     "ethereum-waffle": "^4.0.10",
     "ethers": "^5.7.2",
@@ -42,4 +42,4 @@
     "@uniswap/v2-periphery": "^1.1.0-beta.0",
     "dotenv": "^16.3.1"
   }
-} 
+}

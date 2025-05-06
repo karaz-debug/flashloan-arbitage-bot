@@ -8,6 +8,20 @@ import os
 from dotenv import load_dotenv
 from web3.middleware import geth_poa_middleware
 
+
+#    Python Bot:
+#    ↓ Monitors prices on Uniswap and SushiSwap
+#    ↓ Finds price difference > 0.5%
+#    ↓ Calls smart contract
+   
+#    Smart Contract:
+#    ↓ Borrows USDC from Aave
+#    ↓ Swaps on Uniswap
+#    ↓ Swaps on SushiSwap
+#    ↓ Repays flash loan
+#    ↓ Keeps profit
+
+
 # Load environment variables
 load_dotenv()
 

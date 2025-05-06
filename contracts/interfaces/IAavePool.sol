@@ -28,6 +28,24 @@ interface IAavePool {
     ) external;
 
     /**
+     * @notice Allows smartcontracts to access the liquidity of the pool within one transaction,
+     * as long as the amount taken plus a fee is returned.
+     * @param receiverAddress The address of the contract receiving the funds, implementing the
+     * IFlashLoanSimpleReceiver interface
+     * @param asset The address of the asset being flash-borrowed
+     * @param amount The amount of the asset being flash-borrowed
+     * @param params Variadic packed params to pass to the receiver as extra information
+     * @param referralCode The code used to register the integrator originating the operation, for potential rewards.
+     */
+    function flashLoanSimple(
+        address receiverAddress,
+        address asset,
+        uint256 amount,
+        bytes calldata params,
+        uint16 referralCode
+    ) external;
+
+    /**
      * @notice Returns the total fee on flash loans
      * @return The total fee on flash loans
      */
