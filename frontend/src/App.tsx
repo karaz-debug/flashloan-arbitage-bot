@@ -1,4 +1,6 @@
-import { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Web3Provider } from '@ethersproject/providers';
+import { DexMonitor } from './services/DexMonitor';
 import {
   ChakraProvider,
   Box,
@@ -29,196 +31,382 @@ import {
   Th,
   Td,
   SimpleGrid,
+  Tabs,
+  TabList,
+  TabPanels,
+  Tab,
+  TabPanel,
+  Flex,
+  HStack,
+  Icon,
 } from '@chakra-ui/react';
-import { ethers } from 'ethers';
-import FlashloanArbitrage from './contracts/FlashloanArbitrage.json';
-import { PriceMonitor } from './services/priceMonitor';
-
-// Add type declaration for window.ethereum
-declare global {
-  interface Window {
-    ethereum: any;
-  }
-}
-
-// Contract addresses from our local deployment
-const CONTRACT_ADDRESS = "0x1613beB3B2C4f22Ee086B2b38C1476A3cE7f78E8";
-const USDC_ADDRESS = "0x67d269191c92Caf3cD7723F116c85e6E9bf55933";
-const WETH_ADDRESS = "0xE6E340D132b5f46d1e472DebcD681B2aBc16e57E";
-const USDT_ADDRESS = "0xc3e53F4d16Ae77Db1c982e75a937B9f60FE63690";
+import { CheckCircleIcon, WarningIcon } from '@chakra-ui/icons';
 
 function App() {
-  const [provider, setProvider] = useState<ethers.providers.Web3Provider | null>(null);
-  const [signer, setSigner] = useState<ethers.Signer | null>(null);
-  const [contract, setContract] = useState<ethers.Contract | null>(null);
-  const [amount, setAmount] = useState<string>("1000");
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [trades, setTrades] = useState<Array<{ token: string; amount: string; profit: string; timestamp: Date }>>([]);
-  const [priceMonitor, setPriceMonitor] = useState<PriceMonitor | null>(null);
-  const [arbitrageOpportunity, setArbitrageOpportunity] = useState<{
-    profitable: boolean;
-    profit: number;
-    details: string;
-  } | null>(null);
-  const [arbitrageDetails, setArbitrageDetails] = useState<string>("");
-  const [prices, setPrices] = useState<{
-    uniswap: { usdcWeth: number; wethUsdt: number };
-    sushiswap: { usdcWeth: number; wethUsdt: number };
-    lastPrices?: {
-      uniswap: { usdcWeth: number; wethUsdt: number };
-      sushiswap: { usdcWeth: number; wethUsdt: number };
-    };
-  } | null>(null);
+  const [dexMonitor, setDexMonitor] = useState<DexMonitor | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [amount, setAmount] = useState<string>("");
+  const [useOptimalAmount, setUseOptimalAmount] = useState<boolean>(true);
+  const [prices, setPrices] = useState<{ [key: string]: any }>({});
+  const [opportunities, setOpportunities] = useState<any[]>([]);
   const toast = useToast();
 
   useEffect(() => {
-    let mounted = true;
-    let contractInstance: ethers.Contract | null = null;
-
-    const init = async () => {
-      if (window.ethereum) {
-        const provider = new ethers.providers.Web3Provider(window.ethereum);
-        setProvider(provider);
-
-        try {
-          await window.ethereum.request({ method: 'eth_requestAccounts' });
-          const signer = provider.getSigner();
-          setSigner(signer);
-
-          contractInstance = new ethers.Contract(
-            CONTRACT_ADDRESS,
-            FlashloanArbitrage.abi,
-            signer
-          );
-          setContract(contractInstance);
-
-          // Initialize price monitor
-          const monitor = new PriceMonitor(provider);
-          setPriceMonitor(monitor);
-
-          // Listen for ArbitrageExecuted events
-          contractInstance.on("ArbitrageExecuted", (token, amount, profit, event) => {
-            if (mounted) {
-              const trade = {
-                token,
-                amount: ethers.utils.formatUnits(amount, 6),
-                profit: ethers.utils.formatUnits(profit, 6),
-                timestamp: new Date()
-              };
-              setTrades(prev => [trade, ...prev]);
-            }
-          });
-        } catch (error) {
-          console.error("Error connecting to wallet:", error);
-        }
-      }
-    };
-
-    init();
-
-    return () => {
-      mounted = false;
-      if (contractInstance) {
-        contractInstance.removeAllListeners("ArbitrageExecuted");
-      }
-    };
-  }, []);
-
-  // Monitor prices and check for arbitrage opportunities
-  useEffect(() => {
-    let intervalId: NodeJS.Timeout;
-
-    const checkArbitrage = async () => {
-      if (priceMonitor && amount) {
-        try {
-          const opportunity = await priceMonitor.calculateArbitrageOpportunity(parseFloat(amount));
-          setArbitrageOpportunity(opportunity);
-          setArbitrageDetails(opportunity.details);
+    const connectWallet = async () => {
+      try {
+        if (window.ethereum) {
+          const provider = new Web3Provider(window.ethereum);
           
-          // Get current prices
-          const currentPrices = await priceMonitor.getPrices();
-          setPrices(prev => ({
-            ...currentPrices,
-            lastPrices: prev ? {
-              uniswap: prev.uniswap,
-              sushiswap: prev.sushiswap
-            } : undefined
-          }));
-        } catch (error) {
-          console.error('Error checking arbitrage:', error);
+          // Request account access
+          await provider.send('eth_requestAccounts', []);
+          
+          // Check if we're on Polygon network
+          const network = await provider.getNetwork();
+          if (network.chainId !== 137) { // Polygon mainnet chainId
+            try {
+              // Try to switch to Polygon
+              await window.ethereum.request({
+                method: 'wallet_switchEthereumChain',
+                params: [{ chainId: '0x89' }], // 137 in hex
+              });
+            } catch (switchError: any) {
+              // If Polygon is not added to MetaMask, add it
+              if (switchError.code === 4902) {
+                await window.ethereum.request({
+                  method: 'wallet_addEthereumChain',
+                  params: [{
+                    chainId: '0x89',
+                    chainName: 'Polygon Mainnet',
+                    nativeCurrency: {
+                      name: 'MATIC',
+                      symbol: 'MATIC',
+                      decimals: 18
+                    },
+                    rpcUrls: ['https://polygon-rpc.com'],
+                    blockExplorerUrls: ['https://polygonscan.com']
+                  }]
+                });
+              } else {
+                throw switchError;
+              }
+            }
+          }
+
+          const monitor = await DexMonitor.create(provider);
+          setDexMonitor(monitor);
+          setIsConnected(true);
+          toast({
+            title: 'Connected',
+            description: 'Successfully connected to Polygon network',
+            status: 'success',
+            duration: 3000,
+            isClosable: true,
+          });
+        } else {
+          // If no MetaMask, use public RPC
+          const monitor = await DexMonitor.create();
+          setDexMonitor(monitor);
+          setIsConnected(true);
+          toast({
+            title: 'Connected',
+            description: 'Using Polygon public RPC endpoint',
+            status: 'info',
+            duration: 3000,
+            isClosable: true,
+          });
         }
+      } catch (error) {
+        console.error('Error connecting wallet:', error);
+        toast({
+          title: 'Error',
+          description: 'Failed to connect wallet',
+          status: 'error',
+          duration: 3000,
+          isClosable: true,
+        });
       }
     };
 
-    if (priceMonitor) {
-      checkArbitrage();
-      intervalId = setInterval(checkArbitrage, 10000); // Check every 10 seconds
-    }
+    connectWallet();
+  }, [toast]);
 
-    return () => {
-      if (intervalId) {
-        clearInterval(intervalId);
+  useEffect(() => {
+    if (!dexMonitor) return;
+
+    const checkPrices = async () => {
+      try {
+        if (useOptimalAmount) {
+          console.log('Finding optimal arbitrage opportunities...');
+          const opportunities = await dexMonitor.findArbitrageOpportunities();
+          console.log('Found opportunities:', opportunities);
+          setOpportunities(opportunities);
+        } else {
+          const amountNumber = parseFloat(amount);
+          if (isNaN(amountNumber) || amountNumber <= 0) {
+            console.log('Invalid amount, skipping price check');
+            return;
+          }
+          console.log('Checking prices with amount:', amountNumber);
+          const opportunities = await dexMonitor.findArbitrageOpportunities(amountNumber);
+          console.log('Found opportunities:', opportunities);
+          setOpportunities(opportunities);
+        }
+      } catch (error) {
+        console.error('Error checking prices:', error);
+        toast({
+          title: "Error",
+          description: "Failed to fetch prices",
+          status: "error",
+          duration: 5000,
+          isClosable: true,
+        });
       }
     };
-  }, [priceMonitor, amount]);
 
-  const executeArbitrage = async () => {
-    if (!contract || !signer) {
-      toast({
-        title: "Error",
-        description: "Please connect your wallet first",
-        status: "error",
-        duration: 5000,
-        isClosable: true,
-      });
-      return;
-    }
+    const interval = setInterval(checkPrices, 10000);
+    checkPrices(); // Initial check
 
-    if (!arbitrageOpportunity?.profitable) {
-      toast({
-        title: "Warning",
-        description: "No profitable arbitrage opportunity found",
-        status: "warning",
-        duration: 5000,
-        isClosable: true,
-      });
-      return;
-    }
+    return () => clearInterval(interval);
+  }, [dexMonitor, amount, useOptimalAmount, toast]);
 
-    try {
-      setIsLoading(true);
-      const amountWei = ethers.utils.parseUnits(amount, 6);
-      const path1 = [USDC_ADDRESS, WETH_ADDRESS, USDT_ADDRESS];
-      const path2 = [USDT_ADDRESS, WETH_ADDRESS, USDC_ADDRESS];
-
-      const tx = await contract.executeArbitrage(
-        USDC_ADDRESS,
-        amountWei,
-        path1,
-        path2
+  const renderOpportunities = () => {
+    if (!opportunities.length) {
+      return (
+        <Box p={4} textAlign="center" bg="gray.50" borderRadius="md">
+          <Text color="gray.500">No opportunities found</Text>
+        </Box>
       );
-
-      await tx.wait();
-
-      toast({
-        title: "Success",
-        description: "Arbitrage executed successfully!",
-        status: "success",
-        duration: 5000,
-        isClosable: true,
-      });
-    } catch (error) {
-      console.error("Error executing arbitrage:", error);
-      toast({
-        title: "Error",
-        description: "Failed to execute arbitrage",
-        status: "error",
-        duration: 5000,
-        isClosable: true,
-      });
-    } finally {
-      setIsLoading(false);
     }
+
+    const profitableOpps = opportunities.filter(opp => opp.opportunity.profitable);
+    const nonProfitableOpps = opportunities.filter(opp => !opp.opportunity.profitable);
+
+    return (
+      <VStack spacing={6} align="stretch">
+        {profitableOpps.length > 0 && (
+          <Box>
+            <Heading size="md" mb={4} color="green.600">
+              Profitable Opportunities ({profitableOpps.length})
+            </Heading>
+            <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} spacing={4}>
+              {profitableOpps.map((opp, index) => (
+                <Box
+                  key={index}
+                  p={4}
+                  bg="green.50"
+                  borderWidth="1px"
+                  borderColor="green.200"
+                  borderRadius="lg"
+                  boxShadow="sm"
+                >
+                  <Flex justify="space-between" align="start" mb={4}>
+                    <Box>
+                      <Heading size="sm" color="green.700">{opp.pairKey}</Heading>
+                      <Text fontSize="sm" color="gray.600">Amount: {opp.amount} USDC</Text>
+                    </Box>
+                    <Box textAlign="right">
+                      <Text fontSize="xl" fontWeight="bold" color="green.600">
+                        +{opp.details.profitPercentage.toFixed(4)}%
+                      </Text>
+                      <Text fontSize="sm" color="green.600">
+                        +{opp.opportunity.profit.toFixed(6)} USDC
+                      </Text>
+                    </Box>
+                  </Flex>
+
+                  <Grid templateColumns="repeat(2, 1fr)" gap={4} mb={4}>
+                    <Box>
+                      <Text fontWeight="medium" mb={2}>Price Impact</Text>
+                      <VStack align="start" spacing={1}>
+                        <Text fontSize="sm">
+                          Quickswap: {(opp.details.priceImpact.quickswap * 100).toFixed(4)}%
+                        </Text>
+                        <Text fontSize="sm">
+                          Sushiswap: {(opp.details.priceImpact.sushiswap * 100).toFixed(4)}%
+                        </Text>
+                      </VStack>
+                    </Box>
+                    <Box>
+                      <Text fontWeight="medium" mb={2}>Costs</Text>
+                      <VStack align="start" spacing={1}>
+                        <Text fontSize="sm">Fees: {opp.details.fees.toFixed(6)} USDC</Text>
+                        <Text fontSize="sm">Gas: {opp.details.gasCost.toFixed(6)} MATIC</Text>
+                      </VStack>
+                    </Box>
+                  </Grid>
+
+                  <Box>
+                    <Text fontWeight="medium" mb={2}>Conditions</Text>
+                    <SimpleGrid columns={2} spacing={2}>
+                      <HStack>
+                        <Text fontSize="sm" color={opp.details?.conditions?.profitPositive ? "green.500" : "red.500"}>
+                          {opp.details?.conditions?.profitPositive ? "✓" : "✗"} Profit Positive
+                        </Text>
+                      </HStack>
+                      <HStack>
+                        <Text fontSize="sm" color={opp.details?.conditions?.feesAcceptable ? "green.500" : "red.500"}>
+                          {opp.details?.conditions?.feesAcceptable ? "✓" : "✗"} Fees Acceptable
+                        </Text>
+                      </HStack>
+                      <HStack>
+                        <Text fontSize="sm" color={opp.details?.conditions?.gasCostAcceptable ? "green.500" : "red.500"}>
+                          {opp.details?.conditions?.gasCostAcceptable ? "✓" : "✗"} Gas Cost Acceptable
+                        </Text>
+                      </HStack>
+                      <HStack>
+                        <Text fontSize="sm" color={opp.details?.conditions?.minProfitThreshold ? "green.500" : "red.500"}>
+                          {opp.details?.conditions?.minProfitThreshold ? "✓" : "✗"} Min Profit Threshold
+                        </Text>
+                      </HStack>
+                    </SimpleGrid>
+                  </Box>
+                </Box>
+              ))}
+            </SimpleGrid>
+          </Box>
+        )}
+
+        {nonProfitableOpps.length > 0 && (
+          <Box>
+            <Heading size="md" mb={4} color="gray.600">
+              Non-Profitable Opportunities ({nonProfitableOpps.length})
+            </Heading>
+            <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} spacing={4}>
+              {nonProfitableOpps.map((opp, index) => (
+                <Box
+                  key={index}
+                  p={4}
+                  bg="gray.50"
+                  borderWidth="1px"
+                  borderColor="gray.200"
+                  borderRadius="lg"
+                  boxShadow="sm"
+                >
+                  <Flex justify="space-between" align="start" mb={4}>
+                    <Box>
+                      <Heading size="sm" color="gray.700">{opp.pairKey}</Heading>
+                      <Text fontSize="sm" color="gray.600">Amount: {opp.amount} USDC</Text>
+                    </Box>
+                    <Box textAlign="right">
+                      <Text fontSize="xl" fontWeight="bold" color="gray.600">
+                        {opp.details.profitPercentage.toFixed(4)}%
+                      </Text>
+                      <Text fontSize="sm" color="gray.600">
+                        {opp.opportunity.profit.toFixed(6)} USDC
+                      </Text>
+                    </Box>
+                  </Flex>
+
+                  <Grid templateColumns="repeat(2, 1fr)" gap={4} mb={4}>
+                    <Box>
+                      <Text fontWeight="medium" mb={2}>Price Impact</Text>
+                      <VStack align="start" spacing={1}>
+                        <Text fontSize="sm">
+                          Quickswap: {(opp.details.priceImpact.quickswap * 100).toFixed(4)}%
+                        </Text>
+                        <Text fontSize="sm">
+                          Sushiswap: {(opp.details.priceImpact.sushiswap * 100).toFixed(4)}%
+                        </Text>
+                      </VStack>
+                    </Box>
+                    <Box>
+                      <Text fontWeight="medium" mb={2}>Costs</Text>
+                      <VStack align="start" spacing={1}>
+                        <Text fontSize="sm">Fees: {opp.details.fees.toFixed(6)} USDC</Text>
+                        <Text fontSize="sm">Gas: {opp.details.gasCost.toFixed(6)} MATIC</Text>
+                      </VStack>
+                    </Box>
+                  </Grid>
+
+                  <Box>
+                    <Text fontWeight="medium" mb={2}>Conditions</Text>
+                    <SimpleGrid columns={2} spacing={2}>
+                      <HStack>
+                        <Text fontSize="sm" color={opp.details?.conditions?.profitPositive ? "green.500" : "red.500"}>
+                          {opp.details?.conditions?.profitPositive ? "✓" : "✗"} Profit Positive
+                        </Text>
+                      </HStack>
+                      <HStack>
+                        <Text fontSize="sm" color={opp.details?.conditions?.feesAcceptable ? "green.500" : "red.500"}>
+                          {opp.details?.conditions?.feesAcceptable ? "✓" : "✗"} Fees Acceptable
+                        </Text>
+                      </HStack>
+                      <HStack>
+                        <Text fontSize="sm" color={opp.details?.conditions?.gasCostAcceptable ? "green.500" : "red.500"}>
+                          {opp.details?.conditions?.gasCostAcceptable ? "✓" : "✗"} Gas Cost Acceptable
+                        </Text>
+                      </HStack>
+                      <HStack>
+                        <Text fontSize="sm" color={opp.details?.conditions?.minProfitThreshold ? "green.500" : "red.500"}>
+                          {opp.details?.conditions?.minProfitThreshold ? "✓" : "✗"} Min Profit Threshold
+                        </Text>
+                      </HStack>
+                    </SimpleGrid>
+                  </Box>
+
+                  {/* Add Profit Calculation Breakdown */}
+                  <Box mt={4} p={3} bg="gray.100" borderRadius="md">
+                    <Text fontWeight="medium" mb={2}>Profit Calculation Breakdown</Text>
+                    <VStack align="stretch" spacing={2}>
+                      <Box>
+                        <Text fontSize="sm" fontWeight="medium">Initial Investment:</Text>
+                        <Text fontSize="sm" color="blue.600" fontWeight="bold">
+                          {opp.amount || 0} USDC
+                        </Text>
+                      </Box>
+                      <Box>
+                        <Text fontSize="sm" fontWeight="medium">After First Trade:</Text>
+                        <Text fontSize="sm" color="gray.600">
+                          {opp.details?.afterFirstTrade?.toFixed(6) || '0.000000'} {opp.pairKey.split('-')[1]}
+                        </Text>
+                      </Box>
+                      <Box>
+                        <Text fontSize="sm" fontWeight="medium">After Second Trade:</Text>
+                        <Text fontSize="sm" color="gray.600">
+                          {opp.details?.afterSecondTrade?.toFixed(6) || '0.000000'} USDC
+                        </Text>
+                      </Box>
+                      <Divider />
+                      <Box>
+                        <Text fontSize="sm" fontWeight="medium">Costs:</Text>
+                        <VStack align="start" spacing={1}>
+                          <Text fontSize="sm" color="red.500">
+                            - Fees: {opp.details?.fees?.toFixed(6) || '0.000000'} USDC
+                          </Text>
+                          <Text fontSize="sm" color="red.500">
+                            - Gas: {opp.details?.gasCost?.toFixed(6) || '0.000000'} MATIC
+                          </Text>
+                        </VStack>
+                      </Box>
+                      <Divider />
+                      <Box>
+                        <Text fontSize="sm" fontWeight="medium">Final Amount:</Text>
+                        <Text fontSize="sm" color={opp.opportunity?.profit > 0 ? "green.600" : "red.600"} fontWeight="bold">
+                          {opp.details?.finalAmount?.toFixed(6) || '0.000000'} USDC
+                        </Text>
+                      </Box>
+                      <Box>
+                        <Text fontSize="sm" fontWeight="medium">Net Profit/Loss:</Text>
+                        <Text fontSize="sm" color={opp.opportunity?.profit > 0 ? "green.600" : "red.600"} fontWeight="bold">
+                          {opp.opportunity?.profit > 0 ? "+" : ""}{opp.opportunity?.profit?.toFixed(6) || '0.000000'} USDC
+                          ({opp.details?.profitPercentage?.toFixed(4) || '0.0000'}%)
+                        </Text>
+                      </Box>
+                    </VStack>
+                  </Box>
+                </Box>
+              ))}
+            </SimpleGrid>
+          </Box>
+        )}
+
+        <Box mt={4}>
+          <Text fontSize="sm" color="gray.500">
+            Last updated: {new Date().toLocaleTimeString()}
+          </Text>
+        </Box>
+      </VStack>
+    );
   };
 
   return (
@@ -227,6 +415,18 @@ function App() {
         <VStack spacing={8} align="stretch">
           <Heading textAlign="center" mb={8}>Flash Loan Arbitrage Bot</Heading>
           
+          {/* Connection Status */}
+          <Card>
+            <CardHeader>
+              <Heading size="md">Connection Status</Heading>
+            </CardHeader>
+            <CardBody>
+              <Badge colorScheme={isConnected ? "green" : "red"} fontSize="lg">
+                {isConnected ? "Connected" : "Disconnected"}
+              </Badge>
+            </CardBody>
+          </Card>
+
           {/* Price Monitoring Section */}
           <Card>
             <CardHeader>
@@ -234,76 +434,48 @@ function App() {
               <Text fontSize="sm" color="gray.500">Updates every 10 seconds</Text>
             </CardHeader>
             <CardBody>
-              {prices && (
-                <Box>
-                  <Heading size="md" mb={4}>Uniswap Prices</Heading>
-                  <SimpleGrid columns={2} spacing={4}>
-                    <Stat>
-                      <StatLabel>USDC/WETH</StatLabel>
-                      <StatNumber>{prices.uniswap.usdcWeth.toFixed(6)}</StatNumber>
-                      {prices.lastPrices && (
-                        <StatHelpText>
-                          <StatArrow 
-                            type={prices.uniswap.usdcWeth > prices.lastPrices.uniswap.usdcWeth ? "increase" : "decrease"} 
-                          />
-                          {Math.abs(prices.uniswap.usdcWeth - prices.lastPrices.uniswap.usdcWeth).toFixed(6)}
-                        </StatHelpText>
-                      )}
-                    </Stat>
-                    <Stat>
-                      <StatLabel>WETH/USDT</StatLabel>
-                      <StatNumber>{prices.uniswap.wethUsdt.toFixed(2)}</StatNumber>
-                      {prices.lastPrices && (
-                        <StatHelpText>
-                          <StatArrow 
-                            type={prices.uniswap.wethUsdt > prices.lastPrices.uniswap.wethUsdt ? "increase" : "decrease"} 
-                          />
-                          {Math.abs(prices.uniswap.wethUsdt - prices.lastPrices.uniswap.wethUsdt).toFixed(2)}
-                        </StatHelpText>
-                      )}
-                    </Stat>
-                  </SimpleGrid>
-                </Box>
-              )}
-              {prices && (
-                <Box p={4} borderWidth="1px" borderRadius="lg">
-                  <Heading size="md" mb={4}>SushiSwap Prices</Heading>
-                  <SimpleGrid columns={2} spacing={4}>
-                    <Stat>
-                      <StatLabel>USDC/WETH</StatLabel>
-                      <StatNumber>{prices.sushiswap.usdcWeth.toFixed(6)}</StatNumber>
-                      {prices.lastPrices && (
-                        <StatHelpText>
-                          <StatArrow 
-                            type={prices.sushiswap.usdcWeth > prices.lastPrices.sushiswap.usdcWeth ? "increase" : "decrease"} 
-                          />
-                          {Math.abs(prices.sushiswap.usdcWeth - prices.lastPrices.sushiswap.usdcWeth).toFixed(6)}
-                        </StatHelpText>
-                      )}
-                    </Stat>
-                    <Stat>
-                      <StatLabel>WETH/USDT</StatLabel>
-                      <StatNumber>{prices.sushiswap.wethUsdt.toFixed(2)}</StatNumber>
-                      {prices.lastPrices && (
-                        <StatHelpText>
-                          <StatArrow 
-                            type={prices.sushiswap.wethUsdt > prices.lastPrices.sushiswap.wethUsdt ? "increase" : "decrease"} 
-                          />
-                          {Math.abs(prices.sushiswap.wethUsdt - prices.lastPrices.sushiswap.wethUsdt).toFixed(2)}
-                        </StatHelpText>
-                      )}
-                    </Stat>
-                  </SimpleGrid>
-                </Box>
-              )}
+              <Tabs>
+                <TabList>
+                  {Object.keys(prices).map(pairKey => (
+                    <Tab key={pairKey}>{pairKey}</Tab>
+                  ))}
+                </TabList>
+                <TabPanels>
+                  {Object.entries(prices).map(([pairKey, pairPrices]) => (
+                    <TabPanel key={pairKey}>
+                      <SimpleGrid columns={2} spacing={8}>
+                        <Box>
+                          <Heading size="sm" mb={4}>Uniswap</Heading>
+                          <Stat>
+                            <StatLabel>Price</StatLabel>
+                            <StatNumber>{pairPrices.uniswap.price0.toFixed(6)}</StatNumber>
+                            <StatHelpText>
+                              {pairPrices.uniswap.token0.symbol}/{pairPrices.uniswap.token1.symbol}
+                            </StatHelpText>
+                          </Stat>
+                        </Box>
+                        <Box>
+                          <Heading size="sm" mb={4}>SushiSwap</Heading>
+                          <Stat>
+                            <StatLabel>Price</StatLabel>
+                            <StatNumber>{pairPrices.sushiswap.price0.toFixed(6)}</StatNumber>
+                            <StatHelpText>
+                              {pairPrices.sushiswap.token0.symbol}/{pairPrices.sushiswap.token1.symbol}
+                            </StatHelpText>
+                          </Stat>
+                        </Box>
+                      </SimpleGrid>
+                    </TabPanel>
+                  ))}
+                </TabPanels>
+              </Tabs>
             </CardBody>
           </Card>
 
-          {/* Arbitrage Opportunity Section */}
+          {/* Arbitrage Opportunities Section */}
           <Card>
             <CardHeader>
               <Heading size="md">Arbitrage Opportunities</Heading>
-              <Text fontSize="sm" color="gray.500">Analyzing both trading paths</Text>
             </CardHeader>
             <CardBody>
               <FormControl mb={6}>
@@ -313,73 +485,18 @@ function App() {
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   placeholder="Enter amount in USDC"
+                  isDisabled={useOptimalAmount}
                 />
+                <Button
+                  mt={2}
+                  colorScheme={useOptimalAmount ? "green" : "gray"}
+                  onClick={() => setUseOptimalAmount(!useOptimalAmount)}
+                >
+                  {useOptimalAmount ? "Using Optimal Amounts" : "Use Custom Amount"}
+                </Button>
               </FormControl>
 
-              {arbitrageOpportunity && (
-                <VStack spacing={4} align="stretch">
-                  <Box p={4} borderWidth="1px" borderRadius="md" bg={arbitrageOpportunity.profitable ? "green.50" : "red.50"}>
-                    <Badge colorScheme={arbitrageOpportunity.profitable ? "green" : "red"} mb={2}>
-                      {arbitrageOpportunity.profitable ? "Profitable Opportunity Found!" : "No Profitable Opportunity"}
-                    </Badge>
-                    <Text fontWeight="bold" fontSize="xl">
-                      Expected Profit: {arbitrageOpportunity.profit.toFixed(2)} USDC
-                    </Text>
-                  </Box>
-
-                  <Box>
-                    <Heading size="sm" mb={2}>Trading Paths Analysis</Heading>
-                    <Box p={4} bg="gray.50" borderRadius="md">
-                      <Text whiteSpace="pre-wrap" fontSize="sm">
-                        {arbitrageDetails}
-                      </Text>
-                    </Box>
-                  </Box>
-
-                  <Button
-                    colorScheme="blue"
-                    onClick={executeArbitrage}
-                    isLoading={isLoading}
-                    loadingText="Executing..."
-                    isDisabled={!arbitrageOpportunity.profitable}
-                    size="lg"
-                    width="100%"
-                  >
-                    Execute Arbitrage
-                  </Button>
-                </VStack>
-              )}
-            </CardBody>
-          </Card>
-
-          {/* Recent Trades Section */}
-          <Card>
-            <CardHeader>
-              <Heading size="md">Recent Trades</Heading>
-            </CardHeader>
-            <CardBody>
-              <Table variant="simple">
-                <Thead>
-                  <Tr>
-                    <Th>Time</Th>
-                    <Th>Token</Th>
-                    <Th isNumeric>Amount</Th>
-                    <Th isNumeric>Profit</Th>
-                  </Tr>
-                </Thead>
-                <Tbody>
-                  {trades.map((trade, index) => (
-                    <Tr key={index}>
-                      <Td>{trade.timestamp.toLocaleTimeString()}</Td>
-                      <Td>{trade.token}</Td>
-                      <Td isNumeric>{trade.amount} USDC</Td>
-                      <Td isNumeric color={parseFloat(trade.profit) > 0 ? "green.500" : "red.500"}>
-                        {trade.profit} USDC
-                      </Td>
-                    </Tr>
-                  ))}
-                </Tbody>
-              </Table>
+              {renderOpportunities()}
             </CardBody>
           </Card>
         </VStack>
